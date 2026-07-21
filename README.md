@@ -1,21 +1,21 @@
-# The AI and Cloud Pipeline Hardening Framework (ACPHF)
-## Practical Log Navigation & Audit Guide (IAL v2)
+# THE AI AND CLOUD PIPELINE HARDENING FRAMEWORK (ACPHF)
+## Practical Log Navigation & Audit Guide (IAL v2.1)
 
 ---
 
-## The Core Philosophy of Log Verification 
+### THE CORE PHILOSOPHY OF LOG VERIFICATION
 
 Auditing a passwordless machine identity is completely different from auditing a human user. A human user exhibits unpredictable behavior across multiple devices and geolocations. A machine identity is a deterministic piece of software. It executes specific code, from a specific runner host, targeting a specific data asset.
 
-Because we enforce the **AI and Cloud Pipeline Hardening Framework (ACPHF)**, we do not waste energy hunting for random anomalies. Instead, we audit for **binary alignment**. We use cloud logs to verify that the runtime reality matches our structural engineering specifications.
+Because we enforce the AI and Cloud Pipeline Hardening Framework (ACPHF), we do not waste energy hunting for random anomalies. Instead, we audit for binary alignment. We use cloud logs to verify that the runtime reality matches our structural engineering specifications.
 
 There are only two core log management interfaces required to validate this framework:
-1. **The Microsoft Entra ID Sign-In Logs Portal:** The primary visual landing zone to verify the initial cryptographic handshake.
-2. **The Azure Log Analytics Workspace (Using Kusto Query Language / KQL):** The deep-dive query engine to trace long-term trends and catch silent, downstream data-plane authorization drops.
+* **The Microsoft Entra ID Sign-In Logs Portal:** The primary visual landing zone to verify the initial cryptographic handshake.
+* **The Azure Log Analytics Workspace (Using Kusto Query Language / KQL):** The deep-dive query engine to trace long-term trends and catch silent, downstream data-plane authorization drops.
 
 ---
 
-## Section 1: The Portal Sign-In Matrix (Quick Visual Audits)
+## SECTION 1: THE PORTAL SIGN-IN MATRIX (QUICK VISUAL AUDITS)
 
 To trace passwordless token exchange handshakes visually in the Microsoft Entra ID Admin Center, navigate directly to:  
 `Monitoring` ➔ `Sign-in logs` ➔ `Non-interactive user sign-ins`
@@ -23,18 +23,12 @@ To trace passwordless token exchange handshakes visually in the Microsoft Entra 
 When reviewing these line entries, you are validating the first three boundaries of the framework using plain talk:
 
 ### 1.1 The Inbound Coordinates Check
-* **Telemetry Target:** Incoming `Tenant ID` and `Application ID` fields.
+* **Telemetry Target:** Incoming Tenant ID and Application ID fields.
 * **Plain Talk Meaning:** Did the external runner find your specific directory, or did it knock on the wrong door? If the Application ID is blank or unmapped, the runner is passing a coordinate that does not exist in your tenant.
 
-### 1.2 The Conditional Trust Handshake & Error Code Glossary
-* **Telemetry Target:** `Status: Success` vs. `Failure` (`ResultType` codes).
-* **Plain Talk Meaning:** This is where strict, case-sensitive Subject Claim validation happens. If string casing or metadata identifiers do not align perfectly, Entra ID logs an explicit failure code.
-
-| Entra ID Error Code | Root Cause Diagnostic | Plain Talk Meaning |
-| :--- | :--- | :--- |
-| **`AADSTS700213`** | Subject Claim Mismatch | The incoming OIDC token string does not match the Federated Credential policy. (Common with GitHub's immutable database claims or string casing errors). |
-| **`AADSTS700211`** | Issuer URL Mismatch | The external runner's OIDC issuer authority URL is incorrect or untrusted by the identity directory. |
-| **`AADSTS500121`** | Authentication / Policy Fault | General federation failure or block triggered during the initial token validation handshake. |
+### 1.2 The Conditional Trust Handshake
+* **Telemetry Target:** Status: Success vs. Failure (ErrorCode: `AADSTS70021`, `AADSTS70022`, or `500121`).
+* **Plain Talk Meaning:** This is where strict, case-sensitive Subject Claim validation happens. If an engineer typed `refs/heads/Main` with a capital M in GitHub, but the Entra ID Federated Credential policy expects a lowercase m (`refs/heads/main`), the portal will log a hard authentication failure right here (typically flagging `AADSTS70021`: *No matching federated identity record found*). The handshake drops dead at the perimeter.
 
 ### 1.3 The Token Volatility Lifetime
 * **Telemetry Target:** Timestamp spacing between subsequent successful sign-ins from the exact same application identity.
@@ -42,69 +36,69 @@ When reviewing these line entries, you are validating the first three boundaries
 
 ---
 
-## Section 2: Log Analytics & KQL Emergencies (Data-Plane Tracing)
+## SECTION 2: LOG ANALYTICS & KQL EMERGENCIES (DATA-PLANE TRACING)
 
-The greatest vulnerability in machine identity architecture is the **"Silent 403."** This occurs when the portal sign-in log shows a 100% Success state (the token handshake passed), but the automated runner still crashes because it cannot read the targeted digital vault or database. This happens because the identity was bound to an infrastructure Control-Plane management role instead of an explicit Data-Plane asset role.
+The greatest vulnerability in machine identity architecture is the **"Silent 403."**
+
+This occurs when the portal sign-in log shows a 100% Success state (the token handshake passed), but the automated runner still crashes because it cannot read the targeted digital vault or database. This happens because the identity was bound to an infrastructure Control-Plane management role instead of an explicit Data-Plane asset role.
 
 To expose these downstream faults, you must stream your directory and asset telemetry into an Azure Log Analytics Workspace.
 
-### 2.1 Key Telemetry Log Tables
-* `AADNonInteractiveUserSignInLogs`: The raw directory table tracking external OIDC passwordless token exchanges.
-* `KeyVaultRequests` / `StorageBlobLogs` / `AzureDiagnostics`: The data-plane asset tables tracking raw access attempts inside the resource vault post-authentication.
+### 2.1 Key Log Tables Defined
+* `AADNonInteractiveUserSignInLogs`: Tracks external OIDC passwordless token exchanges into the directory.
+* `KeyVaultRequests` / `StorageBlobLogs` (Resource-Specific) or `AzureDiagnostics` (Legacy): Data-plane asset tables tracking actual transactions inside target resource vaults.
 
-### 2.2 Deep-Dive KQL Diagnostic Query
-Instead of hunting through thousands of rows of raw JSON text, execute this unified Kusto query to correlate directory sign-ins directly with downstream resource access drops across `CorrelationId`:
+### 2.2 Plain Talk KQL Analysis & Time-Window Correlation
+Instead of hunting through thousands of rows of raw JSON text, you can execute a streamlined Kusto query to instantly isolate identity failures. Note that Entra ID authentication correlation IDs do not natively flow into resource data-plane logs; therefore, queries correlate using Application/Service Principal IDs aligned within a narrow execution time window (5-10 minutes).
 
+In plain speech, this query tells the cloud: *"Show me every non-human application identity that successfully authenticated to our directory, but experienced a downstream HTTP 403 access denial on an asset vault within 5 minutes of token issuance."*
+
+#### Why "Commands & Circumstances" Superiority Works
+Relying on hardcoded KQL snippets in a manual or ledger is increasingly outdated because of **schema drift**. Microsoft regularly updates table structures—for example, migrating from legacy `AzureDiagnostics` to resource-specific tables like `KeyVaultSecurityEvents` or changing column names across API versions. Hardcoded code breaks easily and lacks context.
+
+Documenting the **Operational Circumstances** and **AI Intent Commands** instead of raw KQL is significantly better for three major reasons:
+* **Schema Drift Immunity:** Azure or target platform log schemas change over time. An AI agent inspecting your live Log Analytics workspace can dynamically query table metadata and write syntactically correct KQL on the fly for whatever schema version is active today.
+* **Universal Portability:** A static KQL query only works in Azure Log Analytics. If you ever need to run the same audit in Splunk, Datadog, or Microsoft Sentinel, static KQL is useless. An intent-based command allows AI to instantly generate the query in KQL, SPL, or SQL depending on where you paste it.
+* **Focus on Security Logic over Syntax:** Auditors and engineers shouldn't be debugging missing commas or deprecated column names. Documenting the precise circumstances (the time delta, event IDs, and correlation keys) keeps the focus on the security verification logic rather than query syntax maintenance.
+
+#### Comparison Example
+
+❌ **The Old Way (Static KQL - Brittle):**
 ```kql
-// ACPHF Universal Data-Plane Failure Diagnostic
-let FailedDataPlaneAccess = 
-    union 
-    (
-        KeyVaultRequests
-        | where ResultSignature == "Forbidden" or httpStatusCode_d == 403
-        | project TimeGenerated, CorrelationId, Resource = ResourceId, OperationName, httpStatusCode_d
-    ),
-    (
-        StorageBlobLogs
-        | where StatusCode == 403
-        | project TimeGenerated, CorrelationId, Resource = _ResourceId, OperationName, httpStatusCode_d = StatusCode
-    ),
-    (
-        AzureDiagnostics
-        | where httpStatusCode_d == 403
-        | project TimeGenerated, CorrelationId, Resource = ResourceId, OperationName, httpStatusCode_d
-    );
-AADNonInteractiveUserSignInLogs
-| where ResultType == 0 // Successful directory sign-in
-| project SigninTime = TimeGenerated, AppId, ServicePrincipalName, CorrelationId
-| join kind=inner FailedDataPlaneAccess on CorrelationId
-| project SigninTime, AppId, ServicePrincipalName, OperationName, Resource, httpStatusCode_d, CorrelationId
+// Brittle: Breaks if table schemas change or columns are renamed
+ServicePrincipalSignInLogs
+| where TimeGenerated > ago(24h)
+| where AppId == "22df9133-520e-4fd6-b456-e564190116fc"
+| join kind=inner (
+    AzureDiagnostics 
+    | where Resource == "KV-COMPCODE1-AI-VAULT"
+) on CorrelationId
 ```
 
-**Analyzing Results:** If this query returns rows, your token handshake passed but your RBAC policy is broken. You must immediately bypass control-plane roles (`Contributor`, `Owner`) and explicitly assign the Service Principal to a data-plane role like **Key Vault Secrets User** or **Storage Blob Data Reader**.
+✅ **The Modern Way (Circumstance & Intent Command):**
+* **Audit Circumstance:** Correlating OIDC federated token issuance with data-plane Key Vault operations to detect unauthorized access outside execution windows.
+* **AI Prompt Directive:** *"Inspect the active Log Analytics schema. Write a query that joins `ServicePrincipalSignInLogs` for App ID `22df9133-520e-4fd6-b456-e564190116fc` with Key Vault data-plane access logs (`AuditEvent` or resource-specific equivalent) for vault `kv-compcode1-ai-vault`. Group by 60-minute time buckets to highlight any clock skew or orphaned access events."*
+
+By storing the Circumstance and the Prompt Directive, your write-ups become living, future-proof instructions that any AI assistant can execute across any log platform or schema version.
 
 ---
 
-## Section 3: System Validator & Troubleshooting Checklist
+## SECTION 3: SYSTEM VALIDATOR & TROUBLESHOOTING CHECKLIST
 
-This operational checklist acts as your live navigation map during an active deployment or system audit. Run through these four gates to isolate and remediate any pipeline blockages:
+This operational checklist acts as your live navigation map during an active deployment or system audit. Run through these four questions to instantly resolve any pipeline blockages:
 
-> **[ AUDIT GATE 1 ] Coordinate Check**  
-> **Question:** Is the external automation runner passing the exact, matching target Directory ID?  
-> **Diagnostic Telemetry:** Pipeline logs show network routing or tenant mapping errors.  
-> **Remediation Action:** Update the `AZURE_TENANT_ID` environment variable in the runner configuration with the correct global Tenant GUID.
+### Audit Gate 1: Coordinate Check
+* **Key Verification Question:** Is the external automation runner passing the exact, matching target Directory ID and Application ID?
+* **Failure Symptom & Diagnostics:** Pipeline logs show immediate network routing errors or target subscription mapping faults. Unmapped AppIDs reflect non-existent tenant targets.
 
-> **[ AUDIT GATE 2 ] Character Check**  
-> **Question:** Does the string case in your external repository path match the Federated Credential configuration character-for-character?  
-> **Diagnostic Telemetry:** Entra ID Sign-In Logs display error `AADSTS700213`.  
-> **Remediation Action:** Switch the Federated Credential scenario in Entra ID to **Other Issuer** and manually paste the exact case-sensitive subject string emitted by the OIDC provider.
+### Audit Gate 2: Character Check
+* **Key Verification Question:** Does the string case in your external repository path match the Federated Credential configuration character-for-character?
+* **Failure Symptom & Diagnostics:** Entra ID sign-in logs flag hard authentication failure (e.g., `AADSTS70021`) at the token exchange endpoint due to subject claim mismatch.
 
-> **[ AUDIT GATE 3 ] Clock Check**  
-> **Question:** Is the automated pipeline or AI agent loop attempting to run continuously for longer than 60 minutes without requesting a fresh token?  
-> **Diagnostic Telemetry:** Script terminates exactly 60 minutes after execution with an expired token exception.  
-> **Remediation Action:** Insert an explicit re-authentication loop into the pipeline script before the 55-minute runtime threshold.
+### Audit Gate 3: Clock Check
+* **Key Verification Question:** Is the automated pipeline or AI agent loop attempting to run continuously for longer than 60 minutes without requesting a fresh token?
+* **Failure Symptom & Diagnostics:** Script crashes with an expired token error because Refresh Tokens are natively blocked under short-lived access token policies.
 
-> **[ AUDIT GATE 4 ] Plane Check**  
-> **Question:** Did you assign the machine identity an infrastructure management role instead of a granular data role?  
-> **Diagnostic Telemetry:** Sign-in log displays `Success` (`ResultType 0`), but downstream execution logs return `403 Forbidden`.  
-> **Remediation Action:** Open the target resource container's Access Control (IAM) blade and grant the Service Principal direct Data-Plane permissions (e.g., *Key Vault Secrets User*).
+### Audit Gate 4: Plane Check
+* **Key Verification Question:** Did you assign the machine identity an infrastructure management role instead of a granular data-plane role?
+* **Failure Symptom & Diagnostics:** Sign-in logs show explicit "Success," but downstream pipeline output throws immediate 403 Forbidden errors during asset access.
