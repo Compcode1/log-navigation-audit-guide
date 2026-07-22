@@ -34,37 +34,47 @@ When reviewing these line entries, you are validating the first three boundaries
 * **Telemetry Target:** Timestamp spacing between subsequent successful sign-ins from the exact same application identity.
 * **Plain Talk Meaning:** Because our protocol strictly enforces a 60-minute Access Token ceiling and blocks Refresh Tokens entirely, a long-running pipeline or continuous AI workload must re-authenticate. If you see an identical application successfully logging in every 55 to 60 minutes on the dot, the script is successfully handling token volatility. If it logs in once and crashes exactly 60 minutes later, the script failed to loop back and re-authenticate.
 
----
+SECTION 2: LOG ANALYTICS DATA-PLANE TRACING (GATE 4 RUNBOOK)
 
-2.2 Plain Talk KQL Analysis & Time-Window Correlation
-Instead of hunting through thousands of rows of raw JSON text, you can execute a streamlined Kusto query to instantly isolate identity failures. Note that Entra ID authentication correlation IDs do not natively flow into resource data-plane logs; therefore, queries correlate using Application/Service Principal IDs aligned within a narrow execution time window (5-10 minutes).
+To trace data-plane authorization and verify zero "Silent 403" access drops, navigate in the Azure Portal directly to:
+Azure Portal ➔ Log Analytics Workspaces ➔ [Target Workspace] ➔ General ➔ Logs
 
-In plain speech, this query tells the cloud: "Show me every non-human application identity that successfully authenticated to our directory, but experienced a downstream HTTP 403 access denial on an asset vault within 5 minutes of token issuance."
+2.1 Operational Execution Path
 
-Why "Commands & Circumstances" Superiority Works
-Relying on hardcoded KQL snippets in a manual or ledger is increasingly outdated because of schema drift. Microsoft regularly updates table structures—for example, migrating from legacy AzureDiagnostics to resource-specific tables like KeyVaultSecurityEvents or changing column names across API versions. Hardcoded code breaks easily and lacks context.
+Step 1: Open the query editor for the Log Analytics workspace configured to ingest diagnostics from 'kv-compcode1-ai-vault'.
 
-Documenting the Operational Circumstances and AI Intent Commands instead of raw KQL is significantly better for three major reasons:
+Step 2: Execute the data-plane correlation query using Method A (Direct KQL Execution) or Method B (Universal AI Directive).
 
-Schema Drift Immunity: Azure or target platform log schemas change over time. An AI agent inspecting your live Log Analytics workspace can dynamically query table metadata and write syntactically correct KQL on the fly for whatever schema version is active today.
-Universal Portability: A static KQL query only works in Azure Log Analytics. If you ever need to run the same audit in Splunk, Datadog, or Microsoft Sentinel, static KQL is useless. An intent-based command allows AI to instantly generate the query in KQL, SPL, or SQL depending on where you paste it.
-Focus on Security Logic over Syntax: Auditors and engineers shouldn't be debugging missing commas or deprecated column names. Documenting the precise circumstances (the time delta, event IDs, and correlation keys) keeps the focus on the security verification logic rather than query syntax maintenance.
-Comparison Example
-❌ The Old Way (Static KQL - Brittle):
-
-// Brittle: Breaks if table schemas change or columns are renamed
-ServicePrincipalSignInLogs
+[ Method A: Direct KQL Execution ]
+KeyVaultRequests
 | where TimeGenerated > ago(24h)
-| where AppId == "22df9133-520e-4fd6-b456-e564190116fc"
-| join kind=inner (
-    AzureDiagnostics 
-    | where Resource == "KV-COMPCODE1-AI-VAULT"
-) on CorrelationId
-✅ The Modern Way (Circumstance & Intent Command):
+| where VaultName =~ "kv-compcode1-ai-vault"
+| where IdentityCode == "22df9133-520e-4fd6-b456-e564190116fc" or AppId == "22df9133-520e-4fd6-b456-e564190116fc"
+| project TimeGenerated, VaultName, OperationName, ResultSignature, HttpStatusCode, CallerIpAddress, IdentityCode
+| sort by TimeGenerated desc
 
+[ Method B: Universal AI Intent Directive ]
 Audit Circumstance: Correlating OIDC federated token issuance with data-plane Key Vault operations to detect unauthorized access outside execution windows.
-AI Prompt Directive: "Inspect the active Log Analytics schema. Write a query that joins ServicePrincipalSignInLogs for App ID 22df9133-520e-4fd6-b456-e564190116fc with Key Vault data-plane access logs (AuditEvent or resource-specific equivalent) for vault kv-compcode1-ai-vault. Group by 60-minute time buckets to highlight any clock skew or orphaned access events."
-By storing the Circumstance and the Prompt Directive, your write-ups become living, future-proof instructions that any AI assistant can execute across any log platform or schema version.
+AI Prompt Directive: "Inspect active Log Analytics schema. Query Key Vault data-plane logs for vault kv-compcode1-ai-vault and App ID 22df9133-520e-4fd6-b456-e564190116fc over the last 24 hours. Display the timestamp, operation name, result status, and HTTP status code."
+
+2.2 Telemetry Field Inspection Matrix
+
+Inspect the returned log telemetry against the required baseline values:
+
+| Column Name | Baseline Value | Operational Verification Meaning |
+| :--- | :--- | :--- |
+| OperationName | SecretGet | Confirms the machine identity initiated a secret read action. |
+| HttpStatusCode | 200 | Confirms the target vault validated the token and released the secret payload. |
+| ResultSignature | OK | Confirms zero cryptographic or access control errors occurred during extraction. |
+| IdentityCode / AppId | 22df9133-520e-4fd6-b456-e564190116fc | Confirms the access event belonged strictly to the target bot identity. |
+
+2.3 Audit Gate 4 Boolean Outcome Criteria
+
+PASS: A log row exists containing OperationName == 'SecretGet' and HttpStatusCode == 200. Data-plane access is fully verified.
+FAIL (Silent 403): A log row exists containing HttpStatusCode == 403 or ResultSignature == 'Unauthorized'. The identity successfully authenticated to the directory but lacks data-plane RBAC permissions on the vault asset.
+FAIL (Orphan Run): Zero log entries exist within 5 minutes of a successful Entra ID sign-in event. The pipeline runner failed to connect to the vault endpoint entirely.
+
+
 
 ## SECTION 3: SYSTEM VALIDATOR & TROUBLESHOOTING CHECKLIST
 
