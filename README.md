@@ -34,18 +34,18 @@ When reviewing these line entries, you are validating the first three boundaries
 * **Telemetry Target:** Timestamp spacing between subsequent successful sign-ins from the exact same application identity.
 * **Plain Talk Meaning:** Because our protocol strictly enforces a 60-minute Access Token ceiling and blocks Refresh Tokens entirely, a long-running pipeline or continuous AI workload must re-authenticate. If you see an identical application successfully logging in every 55 to 60 minutes on the dot, the script is successfully handling token volatility. If it logs in once and crashes exactly 60 minutes later, the script failed to loop back and re-authenticate.
 
-SECTION 2: LOG ANALYTICS DATA-PLANE TRACING (GATE 4 RUNBOOK)
+##SECTION 2: LOG ANALYTICS DATA-PLANE TRACING (GATE 4 RUNBOOK)
 
 To trace data-plane authorization and verify zero "Silent 403" access drops, navigate in the Azure Portal directly to:
 Azure Portal ➔ Log Analytics Workspaces ➔ [Target Workspace] ➔ General ➔ Logs
 
-2.1 Operational Execution Path
+##2.1 Operational Execution Path
 
-Step 1: Open the query editor for the Log Analytics workspace configured to ingest diagnostics from 'kv-compcode1-ai-vault'.
+**Step 1: Open the query editor for the Log Analytics workspace configured to ingest diagnostics from 'kv-compcode1-ai-vault'.
 
-Step 2: Execute the data-plane correlation query using Method A (Direct KQL Execution) or Method B (Universal AI Directive).
+**Step 2: Execute the data-plane correlation query using Method A (Direct KQL Execution) or Method B (Universal AI Directive).
 
-[ Method A: Direct KQL Execution ]
+**[ Method A: Direct KQL Execution ]
 KeyVaultRequests
 | where TimeGenerated > ago(24h)
 | where VaultName =~ "kv-compcode1-ai-vault"
@@ -53,13 +53,13 @@ KeyVaultRequests
 | project TimeGenerated, VaultName, OperationName, ResultSignature, HttpStatusCode, CallerIpAddress, IdentityCode
 | sort by TimeGenerated desc
 
-[ Method B: Universal AI Intent Directive ]
+**[ Method B: Universal AI Intent Directive ]
 Audit Circumstance: Correlating OIDC federated token issuance with data-plane Key Vault operations to detect unauthorized access outside execution windows.
 AI Prompt Directive: "Inspect active Log Analytics schema. Query Key Vault data-plane logs for vault kv-compcode1-ai-vault and App ID 22df9133-520e-4fd6-b456-e564190116fc over the last 24 hours. Display the timestamp, operation name, result status, and HTTP status code."
 
-2.2 Telemetry Field Inspection Matrix
+##2.2 Telemetry Field Inspection Matrix
 
-Inspect the returned log telemetry against the required baseline values:
+**Inspect the returned log telemetry against the required baseline values:
 
 | Column Name | Baseline Value | Operational Verification Meaning |
 | :--- | :--- | :--- |
@@ -68,7 +68,7 @@ Inspect the returned log telemetry against the required baseline values:
 | ResultSignature | OK | Confirms zero cryptographic or access control errors occurred during extraction. |
 | IdentityCode / AppId | 22df9133-520e-4fd6-b456-e564190116fc | Confirms the access event belonged strictly to the target bot identity. |
 
-2.3 Audit Gate 4 Boolean Outcome Criteria
+##2.3 Audit Gate 4 Boolean Outcome Criteria
 
 PASS: A log row exists containing OperationName == 'SecretGet' and HttpStatusCode == 200. Data-plane access is fully verified.
 FAIL (Silent 403): A log row exists containing HttpStatusCode == 403 or ResultSignature == 'Unauthorized'. The identity successfully authenticated to the directory but lacks data-plane RBAC permissions on the vault asset.
