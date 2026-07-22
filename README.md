@@ -36,35 +36,22 @@ When reviewing these line entries, you are validating the first three boundaries
 
 ---
 
-## SECTION 2: LOG ANALYTICS & KQL EMERGENCIES (DATA-PLANE TRACING)
-
-The greatest vulnerability in machine identity architecture is the **"Silent 403."**
-
-This occurs when the portal sign-in log shows a 100% Success state (the token handshake passed), but the automated runner still crashes because it cannot read the targeted digital vault or database. This happens because the identity was bound to an infrastructure Control-Plane management role instead of an explicit Data-Plane asset role.
-
-To expose these downstream faults, you must stream your directory and asset telemetry into an Azure Log Analytics Workspace.
-
-### 2.1 Key Log Tables Defined
-* `AADNonInteractiveUserSignInLogs`: Tracks external OIDC passwordless token exchanges into the directory.
-* `KeyVaultRequests` / `StorageBlobLogs` (Resource-Specific) or `AzureDiagnostics` (Legacy): Data-plane asset tables tracking actual transactions inside target resource vaults.
-
-### 2.2 Plain Talk KQL Analysis & Time-Window Correlation
+2.2 Plain Talk KQL Analysis & Time-Window Correlation
 Instead of hunting through thousands of rows of raw JSON text, you can execute a streamlined Kusto query to instantly isolate identity failures. Note that Entra ID authentication correlation IDs do not natively flow into resource data-plane logs; therefore, queries correlate using Application/Service Principal IDs aligned within a narrow execution time window (5-10 minutes).
 
-In plain speech, this query tells the cloud: *"Show me every non-human application identity that successfully authenticated to our directory, but experienced a downstream HTTP 403 access denial on an asset vault within 5 minutes of token issuance."*
+In plain speech, this query tells the cloud: "Show me every non-human application identity that successfully authenticated to our directory, but experienced a downstream HTTP 403 access denial on an asset vault within 5 minutes of token issuance."
 
-#### Why "Commands & Circumstances" Superiority Works
-Relying on hardcoded KQL snippets in a manual or ledger is increasingly outdated because of **schema drift**. Microsoft regularly updates table structures—for example, migrating from legacy `AzureDiagnostics` to resource-specific tables like `KeyVaultSecurityEvents` or changing column names across API versions. Hardcoded code breaks easily and lacks context.
+Why "Commands & Circumstances" Superiority Works
+Relying on hardcoded KQL snippets in a manual or ledger is increasingly outdated because of schema drift. Microsoft regularly updates table structures—for example, migrating from legacy AzureDiagnostics to resource-specific tables like KeyVaultSecurityEvents or changing column names across API versions. Hardcoded code breaks easily and lacks context.
 
-Documenting the **Operational Circumstances** and **AI Intent Commands** instead of raw KQL is significantly better for three major reasons:
-* **Schema Drift Immunity:** Azure or target platform log schemas change over time. An AI agent inspecting your live Log Analytics workspace can dynamically query table metadata and write syntactically correct KQL on the fly for whatever schema version is active today.
-* **Universal Portability:** A static KQL query only works in Azure Log Analytics. If you ever need to run the same audit in Splunk, Datadog, or Microsoft Sentinel, static KQL is useless. An intent-based command allows AI to instantly generate the query in KQL, SPL, or SQL depending on where you paste it.
-* **Focus on Security Logic over Syntax:** Auditors and engineers shouldn't be debugging missing commas or deprecated column names. Documenting the precise circumstances (the time delta, event IDs, and correlation keys) keeps the focus on the security verification logic rather than query syntax maintenance.
+Documenting the Operational Circumstances and AI Intent Commands instead of raw KQL is significantly better for three major reasons:
 
-#### Comparison Example
+Schema Drift Immunity: Azure or target platform log schemas change over time. An AI agent inspecting your live Log Analytics workspace can dynamically query table metadata and write syntactically correct KQL on the fly for whatever schema version is active today.
+Universal Portability: A static KQL query only works in Azure Log Analytics. If you ever need to run the same audit in Splunk, Datadog, or Microsoft Sentinel, static KQL is useless. An intent-based command allows AI to instantly generate the query in KQL, SPL, or SQL depending on where you paste it.
+Focus on Security Logic over Syntax: Auditors and engineers shouldn't be debugging missing commas or deprecated column names. Documenting the precise circumstances (the time delta, event IDs, and correlation keys) keeps the focus on the security verification logic rather than query syntax maintenance.
+Comparison Example
+❌ The Old Way (Static KQL - Brittle):
 
-❌ **The Old Way (Static KQL - Brittle):**
-```kql
 // Brittle: Breaks if table schemas change or columns are renamed
 ServicePrincipalSignInLogs
 | where TimeGenerated > ago(24h)
@@ -73,15 +60,11 @@ ServicePrincipalSignInLogs
     AzureDiagnostics 
     | where Resource == "KV-COMPCODE1-AI-VAULT"
 ) on CorrelationId
-```
+✅ The Modern Way (Circumstance & Intent Command):
 
-✅ **The Modern Way (Circumstance & Intent Command):**
-* **Audit Circumstance:** Correlating OIDC federated token issuance with data-plane Key Vault operations to detect unauthorized access outside execution windows.
-* **AI Prompt Directive:** *"Inspect the active Log Analytics schema. Write a query that joins `ServicePrincipalSignInLogs` for App ID `22df9133-520e-4fd6-b456-e564190116fc` with Key Vault data-plane access logs (`AuditEvent` or resource-specific equivalent) for vault `kv-compcode1-ai-vault`. Group by 60-minute time buckets to highlight any clock skew or orphaned access events."*
-
+Audit Circumstance: Correlating OIDC federated token issuance with data-plane Key Vault operations to detect unauthorized access outside execution windows.
+AI Prompt Directive: "Inspect the active Log Analytics schema. Write a query that joins ServicePrincipalSignInLogs for App ID 22df9133-520e-4fd6-b456-e564190116fc with Key Vault data-plane access logs (AuditEvent or resource-specific equivalent) for vault kv-compcode1-ai-vault. Group by 60-minute time buckets to highlight any clock skew or orphaned access events."
 By storing the Circumstance and the Prompt Directive, your write-ups become living, future-proof instructions that any AI assistant can execute across any log platform or schema version.
-
----
 
 ## SECTION 3: SYSTEM VALIDATOR & TROUBLESHOOTING CHECKLIST
 
